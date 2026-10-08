@@ -13,7 +13,6 @@
     "e2e": "playwright test"
   },
   "dependencies": {
-    "@tesseract.js/core": "^6.0.0",
     "dexie": "^4.0.8",
     "jspdf": "^3.0.1",
     "next": "^15.5.0",
