@@ -26,6 +26,7 @@ export default function HomePage() {
 
           <div className="flex flex-col gap-3 sm:flex-row">
             <a href="/scan" className="rounded-xl bg-white px-7 py-4 font-semibold text-zinc-950 shadow-lg shadow-white/5 transition hover:bg-zinc-200">Scan document</a>
+            <a href="/history" className="rounded-xl border border-zinc-800 px-7 py-4 font-semibold text-zinc-100 transition hover:bg-zinc-900">Scan History</a>
             <button onClick={() => inputRef.current?.click()} className="rounded-xl border border-zinc-800 px-7 py-4 font-semibold text-zinc-100 transition hover:bg-zinc-900">Upload image</button>
           </div>
           <input ref={inputRef} type="file" accept="image/*" className="hidden" onChange={(e) => setFileName(e.target.files?.[0]?.name ?? null)} />

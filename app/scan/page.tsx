@@ -1,5 +1,6 @@
 "use client";
 import { useEffect, useRef, useState } from "react";
+import { useParams, useRouter } from "next/navigation";
 import Tesseract, { recognize } from "tesseract.js";
 import { jsPDF } from "jspdf";
 import { db } from "@/lib/storage/db";
@@ -7,6 +8,8 @@ import type { OCRResult, ScanPage, DocumentRecord } from "@/types/scanner";
 import type { LoggerMessage, RecognizeResult as TessResult } from "tesseract.js";
 
 export default function ScanPage() {
+  const { docId } = useParams<{ docId?: string }>();
+  const router = useRouter();
   const videoRef = useRef<HTMLVideoElement>(null);
   const [error, setError] = useState<string | null>(null);
   const [imageUrl, setImageUrl] = useState<string | null>(null);
@@ -15,6 +18,41 @@ export default function ScanPage() {
   const [ocrText, setOcrText] = useState<string>("");
   const [showResult, setShowResult] = useState(false);
   const [copySuccess, setCopySuccess] = useState(false);
+  const [docIdState, setDocIdState] = useState<string | null>(null);
+
+  // Load document if docId is provided
+  useEffect(() => {
+    if (docId) {
+      setDocIdState(docId);
+      loadDocument(docId);
+    }
+  }, [docId]);
+
+  // Load document from Dexie
+  const loadDocument = async (id: string) => {
+    try {
+      setLoading(true);
+      setError(null);
+      const doc = await db.documents.get(id);
+      if (doc && doc.pages.length > 0) {
+        const page = doc.pages[0];
+        setOcrText(page.ocr?.text || "");
+        setShowResult(true);
+        setLoading(false);
+        // Also set image if available (though we won't display it in view mode)
+        if (page.originalImage) {
+          setImageUrl(URL.createObjectURL(page.originalImage));
+        }
+      } else {
+        setError("Document not found");
+        setLoading(false);
+      }
+    } catch (err) {
+      setError("Failed to load document");
+      setLoading(false);
+      console.error("Document load error:", err);
+    }
+  };
 
   // Camera handling
   useEffect(() => {
@@ -125,7 +163,7 @@ export default function ScanPage() {
       };
       const doc: DocumentRecord = {
         id: crypto.randomUUID(),
-        title: `Scanly Document ${new Date().toLocaleString()}`,
+        title: `Scan — ${new Date().toLocaleDateString()} ${new Date().toLocaleTimeString()}`,
         pages: [scanPage],
         searchableText: text,
         createdAt: Date.now(),
