@@ -5,6 +5,7 @@ import { useParams, useRouter } from "next/navigation";
 import { useCallback, useEffect, useState } from "react";
 
 import BlobImage from "@/components/BlobImage";
+import { useBackendHealth } from "@/hooks/useBackendHealth";
 import { scanlyApi } from "@/lib/api/scanly";
 import { loadSettings } from "@/lib/settings";
 import { db } from "@/lib/storage/db";
@@ -27,7 +28,9 @@ export default function DocumentEditorPage() {
   const [textDraft, setTextDraft] = useState("");
   const [notice, setNotice] = useState<string | null>(null);
   const [view, setView] = useState<"processed" | "original">("processed");
-  const [backendUp, setBackendUp] = useState(false);
+
+  const backendHealth = useBackendHealth();
+  const backendUp = backendHealth !== null && backendHealth !== "loading";
 
   const reload = useCallback(async () => {
     if (!documentId) return;
@@ -43,7 +46,6 @@ export default function DocumentEditorPage() {
 
   useEffect(() => {
     void reload();
-    void scanlyApi.ping().then((info) => setBackendUp(Boolean(info)));
   }, [reload]);
 
   const persist = useCallback(

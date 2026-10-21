@@ -4,6 +4,7 @@ import Link from "next/link";
 import { useCallback, useEffect, useRef, useState } from "react";
 
 import BlobImage from "@/components/BlobImage";
+import { useBackendHealth } from "@/hooks/useBackendHealth";
 import { scanlyApi, type HealthInfo } from "@/lib/api/scanly";
 import { loadSettings } from "@/lib/settings";
 import { db } from "@/lib/storage/db";
@@ -29,15 +30,14 @@ function BackendBadge({ health }: { health: HealthInfo | null | "loading" }) {
 
 export default function HomePage() {
   const fileRef = useRef<HTMLInputElement>(null);
-  const [health, setHealth] = useState<HealthInfo | null | "loading">("loading");
+  const health = useBackendHealth();
   const [recent, setRecent] = useState<DocumentRecord[]>([]);
   const [totalBytes, setTotalBytes] = useState(0);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   const refresh = useCallback(async () => {
-    const [info, docs] = await Promise.all([scanlyApi.ping(), db.documents.orderBy("updatedAt").reverse().limit(6).toArray()]);
-    setHealth(info);
+    const docs = await db.documents.orderBy("updatedAt").reverse().limit(6).toArray();
     setRecent(docs);
     let bytes = 0;
     for (const doc of docs) {

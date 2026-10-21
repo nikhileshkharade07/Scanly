@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import BlobImage from "@/components/BlobImage";
+import { useBackendHealth } from "@/hooks/useBackendHealth";
 import { scanlyApi } from "@/lib/api/scanly";
 import { loadSettings } from "@/lib/settings";
 import { db } from "@/lib/storage/db";
@@ -43,14 +44,14 @@ export default function ScanPage() {
   const [busy, setBusy] = useState(false);
   const [notice, setNotice] = useState<string | null>(null);
   const [dragIndex, setDragIndex] = useState<number | null>(null);
-  const [backendUp, setBackendUp] = useState(true);
+  const backendHealth = useBackendHealth();
+  const backendUp = backendHealth !== null && backendHealth !== "loading";
   const [settings, setSettings] = useState(() => loadSettings());
 
   const activePage = pages[activePageIndex];
 
   useEffect(() => {
     setSettings(loadSettings());
-    void scanlyApi.ping().then((info) => setBackendUp(Boolean(info)));
   }, []);
 
   // Release the live stream on unmount.

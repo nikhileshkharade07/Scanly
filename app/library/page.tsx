@@ -6,6 +6,7 @@ import { Suspense, useCallback, useEffect, useMemo, useState } from "react";
 
 import BlobImage from "@/components/BlobImage";
 import { scanlyApi, type PdfMeta } from "@/lib/api/scanly";
+import { useBackendHealth } from "@/hooks/useBackendHealth";
 import { db } from "@/lib/storage/db";
 import { includesSearchText } from "@/lib/search/text-search";
 import { formatBytes } from "@/lib/utils/image";
@@ -38,7 +39,8 @@ function LibraryInner() {
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [exportingId, setExportingId] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
-  const [backendUp, setBackendUp] = useState(false);
+  const backendHealth = useBackendHealth();
+  const backendUp = backendHealth !== null && backendHealth !== "loading";
 
   const reload = useCallback(async () => {
     const all = await db.documents.orderBy("updatedAt").reverse().toArray();
@@ -48,7 +50,6 @@ function LibraryInner() {
 
   useEffect(() => {
     void reload();
-    void scanlyApi.ping().then((info) => setBackendUp(Boolean(info)));
   }, [reload]);
 
   const visible = useMemo(() => {
