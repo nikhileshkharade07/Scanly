@@ -15,11 +15,7 @@ function BackendBadge({ health }: { health: HealthInfo | null | "loading" }) {
     return <span className="rounded-full border border-zinc-800 px-3 py-1 text-xs text-zinc-500">Checking engine…</span>;
   }
   if (!health) {
-    return (
-      <span className="rounded-full border border-red-900/60 bg-red-950/40 px-3 py-1 text-xs text-red-400" title="Start the C++ backend: .\scripts\dev.ps1">
-        Engine offline
-      </span>
-    );
+    return <span className="rounded-full border border-amber-900/60 bg-amber-950/40 px-3 py-1 text-xs text-amber-300">Engine offline</span>;
   }
   return (
     <span
@@ -97,46 +93,38 @@ export default function HomePage() {
   );
 
   return (
-    <main className="min-h-screen bg-zinc-950 px-5 py-8 text-zinc-100 sm:px-8 lg:px-12">
+    <div className="min-h-[calc(100vh-3.5rem)] px-5 py-10 text-zinc-100 sm:px-8">
       <div className="mx-auto flex max-w-6xl flex-col">
-        <header className="flex flex-wrap items-center justify-between gap-3">
-          <div>
-            <p className="text-xs font-semibold uppercase tracking-[0.28em] text-zinc-500">Privacy-first scanner</p>
-            <h1 className="mt-2 text-3xl font-semibold tracking-tight">Scanly</h1>
-          </div>
-          <div className="flex items-center gap-3">
-            <BackendBadge health={health} />
-            <Link href="/settings" className="rounded-lg border border-zinc-800 px-4 py-2 text-sm text-zinc-300 hover:bg-zinc-900">
-              Settings
-            </Link>
-          </div>
+        <header className="flex items-center justify-end">
+          <BackendBadge health={health} />
         </header>
 
         <section className="mt-10 flex flex-col items-center justify-center text-center">
-          <div className="mb-8 max-w-2xl">
-            <h2 className="text-4xl font-semibold tracking-tight sm:text-5xl">
+          <div className="mb-8 max-w-2xl animate-fade-in">
+            <h1 className="text-4xl font-semibold tracking-tight sm:text-5xl">
               Scan documents.
               <br />
               Keep them yours.
-            </h2>
-            <p className="mx-auto mt-5 max-w-xl text-zinc-400">
-              Camera → document detection → perspective correction → OCR → searchable PDF. Everything runs on this machine — no uploads, no accounts, no telemetry.
+            </h1>
+            <p className="mx-auto mt-5 max-w-xl leading-7 text-zinc-400">
+              Capture with your camera or upload an image, straighten the page, run OCR and export a
+              searchable PDF. Everything is processed on this machine — no uploads, no accounts, no telemetry.
             </p>
           </div>
 
           <div className="flex flex-col gap-3 sm:flex-row">
-            <Link href="/scan" className="rounded-xl bg-white px-7 py-4 font-semibold text-zinc-950 shadow-lg shadow-white/5 transition hover:bg-zinc-200">
+            <Link
+              href="/scan"
+              className="rounded-xl bg-emerald-500 px-7 py-4 font-semibold text-zinc-950 shadow-lg shadow-emerald-500/10 transition hover:bg-emerald-400"
+            >
               Scan document
-            </Link>
-            <Link href="/library" className="rounded-xl border border-zinc-800 px-7 py-4 font-semibold text-zinc-100 transition hover:bg-zinc-900">
-              Library
             </Link>
             <button
               onClick={() => fileRef.current?.click()}
               disabled={busy}
-              className="rounded-xl border border-zinc-800 px-7 py-4 font-semibold text-zinc-100 transition hover:bg-zinc-900 disabled:opacity-50"
+              className="rounded-xl border border-zinc-800 bg-zinc-950 px-7 py-4 font-semibold text-zinc-100 transition hover:bg-zinc-900 disabled:opacity-50"
             >
-              {busy ? "Opening…" : "Upload image"}
+              {busy ? "Opening…" : "Upload document"}
             </button>
           </div>
           <input
@@ -144,22 +132,23 @@ export default function HomePage() {
             type="file"
             accept="image/*"
             className="hidden"
+            aria-label="Upload a document image"
             onChange={(e) => {
               const file = e.target.files?.[0];
               if (file) void onUpload(file);
               e.target.value = "";
             }}
           />
-          {error && <p className="mt-4 text-sm text-red-400">{error}</p>}
+          {error && <p className="mt-4 text-sm text-red-400" role="alert">{error}</p>}
 
-          <div className="mt-16 grid w-full max-w-3xl grid-cols-1 gap-3 text-left sm:grid-cols-3">
+          <div className="mt-16 grid w-full max-w-4xl grid-cols-1 gap-3 text-left sm:grid-cols-3">
             {[
-              ["Local-first", "Images, OCR text and PDFs never leave this device."],
-              ["Real OCR", "Tesseract with word-level boxes and confidence."],
-              ["Searchable PDFs", "Export with a selectable, invisible text layer."],
+              ["Camera capture", "Live camera with document corner detection and manual adjustment."],
+              ["Real OCR", "Tesseract runs locally with word-level boxes and confidence scores."],
+              ["Searchable PDF", "Export with a selectable, invisible text layer positioned per word."],
             ].map(([title, text]) => (
-              <div key={title} className="rounded-xl border border-zinc-900 bg-zinc-950 p-5">
-                <h3 className="font-medium">{title}</h3>
+              <div key={title} className="rounded-xl border border-zinc-900 bg-zinc-950 p-5 transition hover:border-zinc-700">
+                <h2 className="font-medium">{title}</h2>
                 <p className="mt-2 text-sm leading-6 text-zinc-500">{text}</p>
               </div>
             ))}
@@ -177,9 +166,16 @@ export default function HomePage() {
             </div>
           </div>
           {recent.length === 0 ? (
-            <p className="mt-4 rounded-xl border border-dashed border-zinc-800 p-8 text-center text-sm text-zinc-500">
-              No documents yet. Scan or upload your first page to get started.
-            </p>
+            <div className="mt-4 rounded-2xl border border-dashed border-zinc-800 p-10 text-center">
+              <p className="text-zinc-400">No documents yet.</p>
+              <p className="mt-2 text-sm text-zinc-600">Scan or upload your first page — it stays on this device.</p>
+              <Link
+                href="/scan"
+                className="mt-6 inline-block rounded-xl border border-zinc-700 px-6 py-3 font-semibold text-zinc-100 transition hover:bg-zinc-900"
+              >
+                Start scanning
+              </Link>
+            </div>
           ) : (
             <ul className="mt-4 grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-6">
               {recent.map((doc) => {
@@ -207,6 +203,6 @@ export default function HomePage() {
           )}
         </section>
       </div>
-    </main>
+    </div>
   );
 }

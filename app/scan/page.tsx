@@ -407,12 +407,12 @@ export default function ScanPage() {
             <div className="mx-auto mt-4 flex max-w-2xl flex-wrap justify-center gap-3">
               {camera === "active" && (
                 <>
-                  <button onClick={() => void onCapture()} className="rounded-xl bg-white px-7 py-3 font-semibold text-zinc-950 shadow-lg shadow-white/5 hover:bg-zinc-200">
-                    Capture page
-                  </button>
-                  <button onClick={stopCamera} className="rounded-xl border border-zinc-800 px-6 py-3 font-semibold text-zinc-200 hover:bg-zinc-900">
-                    Stop camera
-                  </button>
+                <button onClick={() => void onCapture()} className="rounded-xl bg-white px-7 py-3 font-semibold text-zinc-950 shadow-lg shadow-white/5 hover:bg-zinc-200">
+                  Capture page
+                </button>
+                <button onClick={stopCamera} aria-label="Stop camera" className="rounded-xl border border-zinc-800 px-6 py-3 font-semibold text-zinc-200 hover:bg-zinc-900">
+                  Stop camera
+                </button>
                 </>
               )}
               <button onClick={() => fileRef.current?.click()} className="rounded-xl border border-zinc-800 px-6 py-3 font-semibold text-zinc-200 hover:bg-zinc-900">
@@ -564,10 +564,10 @@ export default function ScanPage() {
                     {page.ocr && <span className="text-emerald-400">OCR ✓</span>}
                   </div>
                   <div className="mt-2 flex gap-1">
-                    <button onClick={() => movePage(index, -1)} disabled={index === 0} className="rounded border border-zinc-800 px-2 py-1 text-xs text-zinc-300 hover:bg-zinc-900 disabled:opacity-40">
+                    <button onClick={() => movePage(index, -1)} disabled={index === 0} aria-label={`Move page ${index + 1} earlier`} className="rounded border border-zinc-800 px-2 py-1 text-xs text-zinc-300 hover:bg-zinc-900 disabled:opacity-40">
                       ←
                     </button>
-                    <button onClick={() => movePage(index, 1)} disabled={index === pages.length - 1} className="rounded border border-zinc-800 px-2 py-1 text-xs text-zinc-300 hover:bg-zinc-900 disabled:opacity-40">
+                    <button onClick={() => movePage(index, 1)} disabled={index === pages.length - 1} aria-label={`Move page ${index + 1} later`} className="rounded border border-zinc-800 px-2 py-1 text-xs text-zinc-300 hover:bg-zinc-900 disabled:opacity-40">
                       →
                     </button>
                     <button
@@ -579,7 +579,7 @@ export default function ScanPage() {
                     >
                       Edit
                     </button>
-                    <button onClick={() => removePage(index)} className="ml-auto rounded border border-red-900/60 px-2 py-1 text-xs text-red-400 hover:bg-red-950/50">
+                    <button onClick={() => removePage(index)} aria-label={`Delete page ${index + 1}`} className="ml-auto rounded border border-red-900/60 px-2 py-1 text-xs text-red-400 hover:bg-red-950/50">
                       Delete
                     </button>
                   </div>
