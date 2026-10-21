@@ -1,0 +1,3 @@
+C:/Users/hp/Downloads/scanly-repo/scanly/build/_deps/crow-subbuild/CMakeFiles/crow-populate.dir
+C:/Users/hp/Downloads/scanly-repo/scanly/build/_deps/crow-subbuild/CMakeFiles/edit_cache.dir
+C:/Users/hp/Downloads/scanly-repo/scanly/build/_deps/crow-subbuild/CMakeFiles/rebuild_cache.dir

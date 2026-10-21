@@ -1,0 +1,15 @@
+C:/Users/hp/Downloads/scanly-repo/scanly/build/CMakeFiles/scanly_core.dir
+C:/Users/hp/Downloads/scanly-repo/scanly/build/CMakeFiles/scanly_http.dir
+C:/Users/hp/Downloads/scanly-repo/scanly/build/CMakeFiles/scanly_server.dir
+C:/Users/hp/Downloads/scanly-repo/scanly/build/CMakeFiles/scanly_tests.dir
+C:/Users/hp/Downloads/scanly-repo/scanly/build/CMakeFiles/package.dir
+C:/Users/hp/Downloads/scanly-repo/scanly/build/CMakeFiles/package_source.dir
+C:/Users/hp/Downloads/scanly-repo/scanly/build/CMakeFiles/test.dir
+C:/Users/hp/Downloads/scanly-repo/scanly/build/CMakeFiles/edit_cache.dir
+C:/Users/hp/Downloads/scanly-repo/scanly/build/CMakeFiles/rebuild_cache.dir
+C:/Users/hp/Downloads/scanly-repo/scanly/build/_deps/crow-build/CMakeFiles/uninstall.dir
+C:/Users/hp/Downloads/scanly-repo/scanly/build/_deps/crow-build/CMakeFiles/package.dir
+C:/Users/hp/Downloads/scanly-repo/scanly/build/_deps/crow-build/CMakeFiles/package_source.dir
+C:/Users/hp/Downloads/scanly-repo/scanly/build/_deps/crow-build/CMakeFiles/test.dir
+C:/Users/hp/Downloads/scanly-repo/scanly/build/_deps/crow-build/CMakeFiles/edit_cache.dir
+C:/Users/hp/Downloads/scanly-repo/scanly/build/_deps/crow-build/CMakeFiles/rebuild_cache.dir

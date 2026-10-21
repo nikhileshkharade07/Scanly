@@ -1,0 +1,21 @@
+# ninja log v7
+205	21061	8142960266440100	CMakeFiles/scanly_tests.dir/backend/tests/detection_test.cpp.obj	ee42442f742b968e
+221	21848	8142960266607205	CMakeFiles/scanly_tests.dir/backend/tests/image_process_test.cpp.obj	e27bce3a7a633f1c
+180	46149	8142960266198291	CMakeFiles/scanly_server.dir/backend/src/main.cpp.obj	c503b0662275b2f9
+248	10967	8142968181334249	CMakeFiles/scanly_tests.dir/backend/tests/ocr_test.cpp.obj	deeb68aeb7ebcfda
+233	45444	8142968181186188	CMakeFiles/scanly_http.dir/backend/src/server.cpp.obj	da7526fcd8c179da
+89	2058	8142980240766301	CMakeFiles/scanly_core.dir/backend/src/image_process.cpp.obj	e62f4d4ae83b2669
+99	4974	8142980240867240	CMakeFiles/scanly_core.dir/backend/src/ocr.cpp.obj	ff779253df531fa0
+122	6187	8142980241096273	CMakeFiles/scanly_tests.dir/backend/tests/pdf_test.cpp.obj	62915aeafe8cbc1d
+78	1459	8142987328751570	CMakeFiles/scanly_core.dir/backend/src/detection.cpp.obj	94451d1a372de36d
+109	13581	8142987329069128	CMakeFiles/scanly_tests.dir/backend/tests/api_test.cpp.obj	337d7175f82af416
+16	5193	8143033555346881	CMakeFiles/scanly_core.dir/backend/src/pdf.cpp.obj	7181f237c2b21f8b
+5195	5709	8143033607142542	libscanly_core.a	66faf036cf2012eb
+5709	6007	8143033612271299	libscanly_http.a	ddac36639c47a0ac
+6007	6874	8143033615256946	scanly_server.exe	dc20eaaa8c5ac52f
+35	22162	8143072746604352	CMakeFiles/scanly_core.dir/backend/src/ocr.cpp.obj	ff779253df531fa0
+22166	22684	8143072967925437	libscanly_core.a	66faf036cf2012eb
+22684	24179	8143072987770305	scanly_tests.exe	e1c7d2d4f1c9ae2f
+22684	24179	8143072987770305	scanly_tests[1]_tests.cmake	e1c7d2d4f1c9ae2f
+22684	24179	8143072987770305	C:/Users/hp/Downloads/scanly-repo/scanly/build/scanly_tests[1]_tests.cmake	e1c7d2d4f1c9ae2f
+28	635	8143079033812702	scanly_server.exe	dc20eaaa8c5ac52f

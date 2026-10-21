@@ -1,369 +1,592 @@
 "use client";
-import { useEffect, useRef, useState } from "react";
-import { useParams, useRouter } from "next/navigation";
-import Tesseract, { recognize } from "tesseract.js";
-import { jsPDF } from "jspdf";
+
+import Link from "next/link";
+import { useRouter } from "next/navigation";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+
+import BlobImage from "@/components/BlobImage";
+import { scanlyApi } from "@/lib/api/scanly";
+import { loadSettings } from "@/lib/settings";
 import { db } from "@/lib/storage/db";
-import type { OCRResult, ScanPage, DocumentRecord } from "@/types/scanner";
-import type { LoggerMessage, RecognizeResult as TessResult } from "tesseract.js";
+import { makeThumbnail } from "@/lib/utils/image";
+import type { DetectResult, DocumentRecord, FilterId, Point, ScanPage } from "@/types/scanner";
+
+type Step = "capture" | "adjust" | "review";
+type CameraState = "idle" | "starting" | "active" | "denied" | "unsupported";
+
+const FILTERS: { id: FilterId; label: string }[] = [
+  { id: "auto", label: "Auto" },
+  { id: "original", label: "Original" },
+  { id: "grayscale", label: "Grayscale" },
+  { id: "black-white", label: "B&W" },
+  { id: "contrast", label: "Contrast" },
+  { id: "sharpen", label: "Sharpen" },
+];
+
+const clamp01 = (value: number) => Math.min(1, Math.max(0, value));
 
 export default function ScanPage() {
-  const { docId } = useParams<{ docId?: string }>();
   const router = useRouter();
   const videoRef = useRef<HTMLVideoElement>(null);
-  const [error, setError] = useState<string | null>(null);
-  const [imageUrl, setImageUrl] = useState<string | null>(null);
-  const [loading, setLoading] = useState(false);
-  const [progress, setProgress] = useState<{ status: string; progress: number } | null>(null);
-  const [ocrText, setOcrText] = useState<string>("");
-  const [showResult, setShowResult] = useState(false);
-  const [copySuccess, setCopySuccess] = useState(false);
-  const [docIdState, setDocIdState] = useState<string | null>(null);
+  const fileRef = useRef<HTMLInputElement>(null);
+  const canvasRef = useRef<HTMLCanvasElement>(null);
 
-  // Load document if docId is provided
+  const [camera, setCamera] = useState<CameraState>("idle");
+  const [stream, setStream] = useState<MediaStream | null>(null);
+  const [step, setStep] = useState<Step>("capture");
+  const [pages, setPages] = useState<ScanPage[]>([]);
+  const [activePageIndex, setActivePageIndex] = useState(0);
+  const [originalUrl, setOriginalUrl] = useState<string | null>(null);
+  const [processedUrl, setProcessedUrl] = useState<string | null>(null);
+  const [processing, setProcessing] = useState(false);
+  const [detecting, setDetecting] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [notice, setNotice] = useState<string | null>(null);
+  const [dragIndex, setDragIndex] = useState<number | null>(null);
+  const [backendUp, setBackendUp] = useState(true);
+  const [settings, setSettings] = useState(() => loadSettings());
+
+  const activePage = pages[activePageIndex];
+
   useEffect(() => {
-    if (docId) {
-      setDocIdState(docId);
-      loadDocument(docId);
-    }
-  }, [docId]);
-
-  // Load document from Dexie
-  const loadDocument = async (id: string) => {
-    try {
-      setLoading(true);
-      setError(null);
-      const doc = await db.documents.get(id);
-      if (doc && doc.pages.length > 0) {
-        const page = doc.pages[0];
-        setOcrText(page.ocr?.text || "");
-        setShowResult(true);
-        setLoading(false);
-        // Also set image if available (though we won't display it in view mode)
-        if (page.originalImage) {
-          setImageUrl(URL.createObjectURL(page.originalImage));
-        }
-      } else {
-        setError("Document not found");
-        setLoading(false);
-      }
-    } catch (err) {
-      setError("Failed to load document");
-      setLoading(false);
-      console.error("Document load error:", err);
-    }
-  };
-
-  // Camera handling
-  useEffect(() => {
-    let stream: MediaStream | undefined;
-    void (async () => {
-      try {
-        if (!navigator.mediaDevices?.getUserMedia) throw new Error("Camera access is not supported by this browser.");
-        stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: { ideal: "environment" } }, audio: false });
-        if (videoRef.current) videoRef.current.srcObject = stream;
-      } catch (cause) { setError(cause instanceof Error ? cause.message : "Unable to access the camera."); }
-    })();
-    return () => stream?.getTracks().forEach((track) => track.stop());
+    setSettings(loadSettings());
+    void scanlyApi.ping().then((info) => setBackendUp(Boolean(info)));
   }, []);
 
-  const handleCapture = async () => {
-    if (!videoRef.current) return;
-    try {
-      const canvas = document.createElement("canvas");
-      canvas.width = videoRef.current.videoWidth;
-      canvas.height = videoRef.current.videoHeight;
-      const ctx = canvas.getContext("2d");
-      if (!ctx) throw new Error("Could not get canvas context");
-      ctx.drawImage(videoRef.current, 0, 0, canvas.width, canvas.height);
-      canvas.toBlob((blob) => {
-        if (blob) {
-          setImageUrl(URL.createObjectURL(blob));
-          setError(null);
-          startOcr(blob);
-        } else {
-          setError("Failed to capture image");
-        }
-      }, "image/png");
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Unknown error");
-    }
-  };
+  // Release the live stream on unmount.
+  useEffect(() => {
+    return () => {
+      stream?.getTracks().forEach((track) => track.stop());
+    };
+  }, [stream]);
 
-  const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
-    if (!file.type.startsWith("image/")) {
-      setError("Please select an image file");
+  // Revoke preview URLs on unmount.
+  useEffect(() => {
+    return () => {
+      if (originalUrl) URL.revokeObjectURL(originalUrl);
+      if (processedUrl) URL.revokeObjectURL(processedUrl);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  const startCamera = useCallback(async () => {
+    if (!navigator.mediaDevices?.getUserMedia) {
+      setCamera("unsupported");
       return;
     }
-    setError(null);
-    setImageUrl(URL.createObjectURL(file));
-    startOcr(file);
-  };
-
-  const startOcr = async (image: Blob | File) => {
-    setLoading(true);
-    setProgress({ status: "Initializing", progress: 0 });
-    setOcrText("");
-    setShowResult(false);
-    setCopySuccess(false);
+    setCamera("starting");
     try {
-      const result = await recognize(image, "eng", {
-        logger: (m) => {
-          // Map Tesseract progress status to our own messages
-          let status = "";
-          switch (m.status) {
-            case "loading":
-              status = "Loading model";
-              break;
-            case "recognizing text":
-              status = "Recognizing text";
-              break;
-            case "loading finished":
-              status = "Almost done";
-              break;
-            default:
-              status = m.status;
-          }
-          setProgress({ status, progress: Math.round(m.progress * 100) });
-        },
+      const media = await navigator.mediaDevices.getUserMedia({
+        video: { facingMode: { ideal: "environment" }, width: { ideal: 1920 }, height: { ideal: 1080 } },
+        audio: false,
       });
-      const text = result.data.text.trim();
-      if (text === "") {
-        setError("No text detected in the image");
-        setLoading(false);
-        return;
+      setStream(media);
+      if (videoRef.current) {
+        videoRef.current.srcObject = media;
+        await videoRef.current.play().catch(() => undefined);
       }
-      setOcrText(text);
-      setShowResult(true);
-      setLoading(false);
-      // Save to history
-      await saveScan(image, text);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "OCR failed");
-      setLoading(false);
+      setCamera("active");
+    } catch (error) {
+      console.warn("Camera unavailable:", error);
+      setCamera("denied");
     }
-  };
+  }, []);
 
-  const saveScan = async (imageBlob: Blob | File, text: string) => {
-    try {
-      const scanPage: ScanPage = {
+  const stopCamera = useCallback(() => {
+    stream?.getTracks().forEach((track) => track.stop());
+    setStream(null);
+    setCamera("idle");
+  }, [stream]);
+
+  /** Grab the current camera frame as a JPEG blob. */
+  const grabFrame = useCallback((): Promise<Blob | null> => {
+    const video = videoRef.current;
+    if (!video || video.videoWidth === 0) return Promise.resolve(null);
+    return new Promise((resolve) => {
+      video.toBlob((blob) => resolve(blob), "image/jpeg", 0.92);
+    });
+  }, []);
+
+  const adoptImage = useCallback(
+    async (blob: Blob, source: "camera" | "file") => {
+      if (originalUrl) URL.revokeObjectURL(originalUrl);
+      const url = URL.createObjectURL(blob);
+      setOriginalUrl(url);
+      setStep("adjust");
+
+      const page: ScanPage = {
         id: crypto.randomUUID(),
-        originalImage: imageBlob instanceof Blob ? imageBlob : new Blob([await (imageBlob as Blob).arrayBuffer()], { type: (imageBlob as Blob).type }),
-        processedImage: undefined,
-        corners: undefined,
-        filter: "original",
-        ocr: {
-          text,
-          confidence: 0, // We don't have confidence from Tesseract.js easily, but we can compute if needed
-          blocks: [], // We don't have block structure from simple recognition
-        },
+        originalImage: blob,
+        filter: settings.defaultFilter,
+        status: "processing",
         createdAt: Date.now(),
       };
-      const doc: DocumentRecord = {
-        id: crypto.randomUUID(),
-        title: `Scan — ${new Date().toLocaleDateString()} ${new Date().toLocaleTimeString()}`,
-        pages: [scanPage],
-        searchableText: text,
-        createdAt: Date.now(),
-        updatedAt: Date.now(),
-      };
-      await db.documents.add(doc);
-    } catch (err) {
-      console.error("Failed to save scan:", err);
-      // Don't fail the UI if saving fails
-    }
-  };
+      setPages((prev) => {
+        const next = [...prev, page];
+        setActivePageIndex(next.length - 1);
+        return next;
+      });
 
-  const copyText = async () => {
-    try {
-      await navigator.clipboard.writeText(ocrText);
-      setCopySuccess(true);
-      setTimeout(() => setCopySuccess(false), 2000);
-    } catch (err) {
-      console.error("Copy failed:", err);
-      setError("Failed to copy text");
-    }
-  };
-
-  const downloadTxt = () => {
-    const blob = new Blob([ocrText], { type: "text/plain" });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement("a");
-    a.href = url;
-    a.download = "scanly-result.txt";
-    a.click();
-    URL.revokeObjectURL(url);
-  };
-
-  const exportPdf = () => {
-    try {
-      const doc = new jsPDF();
-      const pageWidth = doc.internal.pageSize.getWidth();
-      const pageHeight = doc.internal.pageSize.getHeight();
-      const margin = 20;
-      const maxWidth = pageWidth - 2 * margin;
-      const lineHeight = 8; // pt
-      const lines = doc.splitTextToSize(ocrText, maxWidth);
-      let y = margin;
-      for (const line of lines) {
-        if (y > pageHeight - margin) {
-          doc.addPage();
-          y = margin;
+      // Auto-detect document corners (best-effort; manual corners always available).
+      if (backendUp) {
+        setDetecting(true);
+        try {
+          const result: DetectResult = await scanlyApi.detect(blob);
+          if (result.found && result.corners.length === 4) {
+            setPages((prev) =>
+              prev.map((p) => (p.id === page.id ? { ...p, corners: result.corners as [Point, Point, Point, Point] } : p)),
+            );
+          } else if (source === "camera") {
+            setNotice("No document edges detected — adjust the corners manually.");
+          }
+        } catch (error) {
+          console.warn("Detection failed:", error);
+        } finally {
+          setDetecting(false);
         }
-        doc.text(line, margin, y);
-        y += lineHeight;
       }
-      doc.save("scanly-result.pdf");
-    } catch (err) {
-      console.error("PDF export failed:", err);
-      setError("Failed to export PDF");
+    },
+    [backendUp, originalUrl, settings.defaultFilter],
+  );
+
+  const onCapture = useCallback(async () => {
+    const blob = await grabFrame();
+    if (!blob) {
+      setNotice("Camera frame is not ready yet.");
+      return;
     }
-  };
+    await adoptImage(blob, "camera");
+  }, [adoptImage, grabFrame]);
 
-  if (loading && !showResult) {
-    return (
-      <main className="min-h-screen bg-black p-4">
-        <div className="mx-auto flex min-h-[calc(100vh-2rem)] max-w-5xl flex-col items-center justify-center">
-          <header className="mb-4">
-            <a href="/" className="text-sm text-zinc-400 hover:text-white">← Back</a>
-            <span className="font-medium">Scanning document</span>
-          </header>
-          {imageUrl && <img src={imageUrl} alt="Scanned" className="max-w-xl rounded-lg mb-4" />}
-          {progress && (
-            <div className="text-center text-zinc-400">
-              <p className="font-medium">{progress.status}</p>
-              <p className="mt-2">{progress.progress}%</p>
-            </div>
-          )}
-          <button
-            onClick={() => {
-              setImageUrl(null);
-              setLoading(false);
-              setProgress(null);
-            }}
-            className="mt-6 rounded-lg border border-zinc-700 px-4 py-2 text-sm text-zinc-300 hover:bg-zinc-900"
-          >
-            Cancel
-          </button>
-        </div>
-      </main>
-    );
-  }
+  const onPickFile = useCallback(
+    async (file: File) => {
+      await adoptImage(file, "file");
+    },
+    [adoptImage],
+  );
 
-  if (error && !showResult) {
-    return (
-      <main className="min-h-screen bg-black p-4">
-        <div className="mx-auto flex min-h-[calc(100vh-2rem)] max-w-5xl flex-col items-center justify-center">
-          <header className="mb-4">
-            <a href="/" className="text-sm text-zinc-400 hover:text-white">← Back</a>
-            <span className="font-medium">Scan document</span>
-          </header>
-          <div className="text-center">
-            <p className="font-medium text-red-400">Error</p>
-            <p className="mt-2 text-sm text-zinc-400">{error}</p>
-          </div>
-          <div className="mt-6 flex gap-3">
-            <button
-              onClick={() => setError(null)}
-              className="rounded-lg border border-zinc-700 px-4 py-2 text-sm text-zinc-300 hover:bg-zinc-900"
-            >
-              Try again
-            </button>
-            <a href="/" className="rounded-lg bg-white px-4 py-2 font-semibold text-zinc-950 shadow-lg shadow-white/5 transition hover:bg-zinc-200">
-              Back to home
-            </a>
-          </div>
-        </div>
-      </main>
-    );
-  }
+  /** Live-processed preview for the active page. */
+  const refreshPreview = useCallback(async () => {
+    const page = pages[activePageIndex];
+    if (!page || !backendUp) return;
+    setProcessing(true);
+    try {
+      const blob = await scanlyApi.process(page.originalImage, {
+        corners: page.corners ? page.corners.map(([x, y]) => [x, y]) : undefined,
+        filter: page.filter,
+        rotation: page.rotation ?? 0,
+        maxWidth: 1800,
+      });
+      if (processedUrl) URL.revokeObjectURL(processedUrl);
+      setProcessedUrl(URL.createObjectURL(blob));
+      setPages((prev) =>
+        prev.map((p) => (p.id === page.id ? { ...p, processedImage: blob, status: "ready" } : p)),
+      );
+    } catch (error) {
+      console.error("Preview processing failed:", error);
+      setNotice(error instanceof Error ? error.message : "Processing failed.");
+    } finally {
+      setProcessing(false);
+    }
+  }, [activePageIndex, backendUp, pages, processedUrl]);
+
+  // Debounced preview refresh when the page or its settings change.
+  useEffect(() => {
+    if (step !== "adjust" || !activePage || !backendUp) return;
+    const timer = setTimeout(() => void refreshPreview(), 350);
+    return () => clearTimeout(timer);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activePage?.corners, activePage?.filter, activePage?.rotation, step, backendUp]);
+
+  const updateActivePage = useCallback(
+    (patch: Partial<ScanPage>) => {
+      const page = pages[activePageIndex];
+      if (!page) return;
+      setPages((prev) => prev.map((p) => (p.id === page.id ? { ...p, ...patch } : p)));
+    },
+    [activePageIndex, pages],
+  );
+
+  /** Corner dragging on the preview canvas overlay. */
+  const onOverlayPointerDown = useCallback(
+    (event: React.PointerEvent<HTMLDivElement>) => {
+      const page = pages[activePageIndex];
+      if (!page?.corners) return;
+      const rect = event.currentTarget.getBoundingClientRect();
+      const x = clamp01((event.clientX - rect.left) / rect.width);
+      const y = clamp01((event.clientY - rect.top) / rect.height);
+      let nearest = 0;
+      let best = Infinity;
+      page.corners.forEach(([cx, cy], index) => {
+        const d = (cx - x) ** 2 + (cy - y) ** 2;
+        if (d < best) {
+          best = d;
+          nearest = index;
+        }
+      });
+      setDragIndex(nearest);
+      (event.target as HTMLElement).setPointerCapture?.(event.pointerId);
+    },
+    [activePageIndex, pages],
+  );
+
+  const onOverlayPointerMove = useCallback(
+    (event: React.PointerEvent<HTMLDivElement>) => {
+      if (dragIndex === null) return;
+      const page = pages[activePageIndex];
+      if (!page?.corners) return;
+      const rect = event.currentTarget.getBoundingClientRect();
+      const x = clamp01((event.clientX - rect.left) / rect.width);
+      const y = clamp01((event.clientY - rect.top) / rect.height);
+      const corners = page.corners.map(([cx, cy], index) => (index === dragIndex ? ([x, y] as [number, number]) : ([cx, cy] as [number, number]))) as [Point, Point, Point, Point];
+      updateActivePage({ corners });
+    },
+    [activePageIndex, dragIndex, pages, updateActivePage],
+  );
+
+  const onOverlayPointerUp = useCallback(() => setDragIndex(null), []);
+
+  const resetCorners = useCallback(() => updateActivePage({ corners: undefined }), [updateActivePage]);
+
+  const acceptPage = useCallback(() => {
+    setStep("review");
+  }, []);
+
+  const scanAnother = useCallback(() => {
+    setStep("capture");
+    setProcessedUrl(null);
+    setOriginalUrl(null);
+  }, []);
+
+  /** Run OCR on all pages, persist the document, open its editor. */
+  const finishDocument = useCallback(async () => {
+    if (pages.length === 0) return;
+    setBusy(true);
+    setNotice(null);
+    try {
+      const lang = settings.ocrLanguage;
+      const finished: ScanPage[] = [];
+      for (const page of pages) {
+        let ocr = page.ocr;
+        if (!ocr && settings.autoOcr && backendUp) {
+          try {
+            ocr = await scanlyApi.ocr(page.processedImage ?? page.originalImage, lang);
+          } catch (error) {
+            console.warn("OCR failed for page:", error);
+          }
+        }
+        const thumbnail = await makeThumbnail(page.processedImage ?? page.originalImage, 480);
+        finished.push({ ...page, ocr, thumbnail, status: "ready" });
+      }
+      const searchableText = finished
+        .map((page) => page.ocr?.text ?? "")
+        .filter(Boolean)
+        .join("\n\n");
+      const now = Date.now();
+      const record: DocumentRecord = {
+        id: crypto.randomUUID(),
+        title: `Scan ${new Date(now).toLocaleString()}`,
+        pages: finished,
+        searchableText,
+        createdAt: now,
+        updatedAt: now,
+      };
+      await db.documents.add(record);
+      router.push(`/documents/${record.id}`);
+    } catch (error) {
+      console.error("Saving failed:", error);
+      setNotice(error instanceof Error ? error.message : "Saving failed.");
+    } finally {
+      setBusy(false);
+    }
+  }, [backendUp, pages, router, settings.autoOcr, settings.ocrLanguage]);
+
+  const removePage = useCallback(
+    (index: number) => {
+      setPages((prev) => {
+        const next = prev.filter((_, i) => i !== index);
+        setActivePageIndex((current) => Math.min(current, next.length - 1));
+        return next;
+      });
+    },
+    [],
+  );
+
+  const movePage = useCallback((index: number, delta: number) => {
+    setPages((prev) => {
+      const target = index + delta;
+      if (target < 0 || target >= prev.length) return prev;
+      const next = [...prev];
+      [next[index], next[target]] = [next[target], next[index]];
+      return next;
+    });
+  }, []);
+
+  const pagePreviewUrl = useMemo(() => {
+    const page = pages[activePageIndex];
+    if (!page) return null;
+    return processedUrl ?? originalUrl;
+  }, [activePageIndex, originalUrl, pages, processedUrl]);
 
   return (
-    <main className="min-h-screen bg-black p-4">
-      <div className="mx-auto flex min-h-[calc(100vh-2rem)] max-w-5xl flex-col">
-        <header className="flex items-center justify-between border-b border-zinc-900 px-5 py-4">
-          <a href="/" className="text-sm text-zinc-400 hover:text-white">← Back</a>
-          <span className="font-medium">Scan document</span>
-          <span className="w-10" />
+    <main className="min-h-screen bg-zinc-950 px-4 py-6 text-zinc-100 sm:px-8">
+      <div className="mx-auto max-w-5xl">
+        <header className="flex flex-wrap items-center justify-between gap-3">
+          <div>
+            <p className="text-xs font-semibold uppercase tracking-[0.28em] text-zinc-500">Scanner</p>
+            <h1 className="mt-1 text-2xl font-semibold tracking-tight">New scan</h1>
+          </div>
+          <div className="flex items-center gap-2">
+            <span className="text-sm text-zinc-500">
+              Step {step === "capture" ? 1 : step === "adjust" ? 2 : 3} of 3 ·{" "}
+              {step === "capture" ? "Capture" : step === "adjust" ? "Adjust" : "Review"}
+            </span>
+            <Link href="/" className="rounded-lg border border-zinc-800 px-4 py-2 text-sm text-zinc-300 hover:bg-zinc-900">
+              Exit
+            </Link>
+          </div>
         </header>
 
-        {!showResult ? (
-          <>
-            <section className="relative flex flex-1 items-center justify-center overflow-hidden bg-zinc-900">
-              {imageUrl && <img src={imageUrl} alt="Preview" className="h-full max-h-[75vh] w-full object-contain" />}
-              <video ref={videoRef} autoPlay playsInline muted className="h-full max-h-[75vh] w-full object-cover" />
-              <div className="pointer-events-none absolute inset-[10%] rounded-xl border-2 border-white/60" />
-              {error && (
-                <div className="absolute mx-6 max-w-md rounded-xl border border-zinc-700 bg-zinc-950/95 p-5 text-center">
-                  <p className="font-medium">Error</p>
-                  <p className="mt-2 text-sm text-zinc-400">{error}</p>
+        {!backendUp && (
+          <p className="mt-4 rounded-lg border border-amber-900/60 bg-amber-950/30 px-4 py-3 text-sm text-amber-300">
+            The local processing engine is offline. Camera capture and drafts still work — run the
+            C++ backend (<code className="font-mono">.\scripts\dev.ps1</code>) to enable detection, enhancement, OCR and PDF export.
+          </p>
+        )}
+        {notice && (
+          <div className="mt-4 flex items-center justify-between rounded-lg border border-zinc-800 bg-zinc-900/50 px-4 py-3 text-sm text-zinc-300">
+            <span>{notice}</span>
+            <button onClick={() => setNotice(null)} className="ml-4 text-zinc-500 hover:text-white">
+              ✕
+            </button>
+          </div>
+        )}
+
+        {step === "capture" && (
+          <section className="mt-6">
+            <div className="relative mx-auto max-w-2xl overflow-hidden rounded-2xl border border-zinc-900 bg-black">
+              <video ref={videoRef} playsInline muted className="aspect-[3/4] w-full object-cover sm:aspect-[4/3]" />
+              {camera !== "active" && (
+                <div className="absolute inset-0 flex flex-col items-center justify-center gap-4 bg-zinc-950/90 p-6 text-center">
+                  {camera === "starting" ? (
+                    <p className="text-zinc-400">Starting camera…</p>
+                  ) : (
+                    <>
+                      <p className="max-w-sm text-zinc-400">
+                        {camera === "denied"
+                          ? "Camera access was denied. You can still upload an image, or re-enable camera permission in your browser settings."
+                          : camera === "unsupported"
+                            ? "This browser does not expose a camera API. Upload an image instead."
+                            : "Point your camera at a document, or upload an image to scan."}
+                      </p>
+                      <div className="flex flex-wrap justify-center gap-3">
+                        {camera !== "denied" && camera !== "unsupported" && (
+                          <button onClick={() => void startCamera()} className="rounded-xl bg-white px-6 py-3 font-semibold text-zinc-950 hover:bg-zinc-200">
+                            Enable camera
+                          </button>
+                        )}
+                        <button onClick={() => fileRef.current?.click()} className="rounded-xl border border-zinc-700 px-6 py-3 font-semibold text-zinc-100 hover:bg-zinc-900">
+                          Upload image
+                        </button>
+                      </div>
+                    </>
+                  )}
                 </div>
               )}
-            </section>
-            <footer className="flex items-center justify-center gap-4 border-t border-zinc-900 p-5">
-              <label className="cursor-pointer rounded-xl border border-zinc-700 px-5 py-3 text-sm">
-                Upload
-                <input type="file" accept="image/*" className="hidden" onChange={handleFileChange} />
-              </label>
-              <button
-                onClick={handleCapture}
-                className="h-16 w-16 rounded-full border-4 border-zinc-700 bg-white"
-                aria-label="Capture document"
-              />
-            </footer>
-          </>
-        ) : (
-          <section className="flex-1 flex-col overflow-y-auto p-6">
-            <div className="mb-4">
-              <textarea
-                value={ocrText}
-                onChange={(e) => setOcrText(e.target.value)}
-                className="w-full min-h-[200px] p-3 bg-zinc-900 border border-zinc-700 rounded-lg text-zinc-100 resize-y focus:outline-none focus:ring-2 focus:ring-zinc-600"
-                placeholder="OCR result will appear here..."
-              />
             </div>
-            <div className="flex flex-wrap gap-3 mb-4">
-              <button
-                onClick={copyText}
-                disabled={!ocrText.trim()}
-                className={`rounded-lg px-4 py-2 text-sm font-medium transition ${
-                  copySuccess
-                    ? "bg-green-600 text-white"
-                    : "border border-zinc-700 bg-zinc-900 text-zinc-100 hover:bg-zinc-800"
-                }`}
-              >
-                {copySuccess ? "Copied!" : "Copy text"}
-              </button>
-              <button
-                onClick={downloadTxt}
-                disabled={!ocrText.trim()}
-                className="rounded-lg border border-zinc-700 px-4 py-2 text-sm text-zinc-100 hover:bg-zinc-900"
-              >
-                Download TXT
-              </button>
-              <button
-                onClick={exportPdf}
-                disabled={!ocrText.trim()}
-                className="rounded-lg border border-zinc-700 px-4 py-2 text-sm text-zinc-100 hover:bg-zinc-900"
-              >
-                Export PDF
-              </button>
-              <button
-                onClick={() => {
-                  setImageUrl(null);
-                  setOcrText("");
-                  setShowResult(false);
-                }}
-                className="rounded-lg border border-zinc-700 px-4 py-2 text-sm text-zinc-100 hover:bg-zinc-900 ml-auto"
-              >
-                Scan another
+
+            <div className="mx-auto mt-4 flex max-w-2xl flex-wrap justify-center gap-3">
+              {camera === "active" && (
+                <>
+                  <button onClick={() => void onCapture()} className="rounded-xl bg-white px-7 py-3 font-semibold text-zinc-950 shadow-lg shadow-white/5 hover:bg-zinc-200">
+                    Capture page
+                  </button>
+                  <button onClick={stopCamera} className="rounded-xl border border-zinc-800 px-6 py-3 font-semibold text-zinc-200 hover:bg-zinc-900">
+                    Stop camera
+                  </button>
+                </>
+              )}
+              <button onClick={() => fileRef.current?.click()} className="rounded-xl border border-zinc-800 px-6 py-3 font-semibold text-zinc-200 hover:bg-zinc-900">
+                Upload image
               </button>
             </div>
+            <input
+              ref={fileRef}
+              type="file"
+              accept="image/*"
+              className="hidden"
+              onChange={(e) => {
+                const file = e.target.files?.[0];
+                if (file) void onPickFile(file);
+                e.target.value = "";
+              }}
+            />
+          </section>
+        )}
+
+        {step === "adjust" && activePage && (
+          <section className="mt-6 grid gap-6 lg:grid-cols-[1fr_320px]">
+            <div>
+              <div
+                className="relative mx-auto max-w-2xl touch-none select-none overflow-hidden rounded-2xl border border-zinc-900 bg-black"
+                onPointerDown={onOverlayPointerDown}
+                onPointerMove={onOverlayPointerMove}
+                onPointerUp={onOverlayPointerUp}
+                onPointerCancel={onOverlayPointerUp}
+              >
+                {pagePreviewUrl && <BlobImage blob={pagePreviewUrl} className="block w-full" />}
+                {activePage.corners && (
+                  <svg viewBox="0 0 100 100" preserveAspectRatio="none" className="pointer-events-none absolute inset-0 h-full w-full">
+                    <polygon
+                      points={activePage.corners.map(([x, y]) => `${x * 100},${y * 100}`).join(" ")}
+                      fill="rgba(34,197,94,0.08)"
+                      stroke="#22c55e"
+                      strokeWidth="0.5"
+                      vectorEffect="non-scaling-stroke"
+                    />
+                  </svg>
+                )}
+                {activePage.corners &&
+                  activePage.corners.map(([x, y], index) => (
+                    <span
+                      key={index}
+                      className="pointer-events-none absolute h-6 w-6 -translate-x-1/2 -translate-y-1/2 rounded-full border-2 border-white bg-emerald-500/80 shadow"
+                      style={{ left: `${x * 100}%`, top: `${y * 100}%` }}
+                    />
+                  ))}
+                {(processing || detecting) && (
+                  <div className="absolute bottom-3 left-3 rounded-md bg-black/70 px-3 py-1 text-xs text-emerald-300">
+                    {detecting ? "Detecting document…" : "Processing…"}
+                  </div>
+                )}
+              </div>
+              <p className="mx-auto mt-3 max-w-2xl text-center text-xs text-zinc-500">
+                Drag the green handles onto the corners of your page. The live preview shows the corrected result.
+              </p>
+            </div>
+
+            <aside className="space-y-4">
+              <div className="rounded-2xl border border-zinc-900 bg-zinc-950 p-5">
+                <h2 className="text-sm font-semibold text-zinc-300">Enhancement</h2>
+                <div className="mt-3 grid grid-cols-2 gap-2">
+                  {FILTERS.map((filter) => (
+                    <button
+                      key={filter.id}
+                      onClick={() => updateActivePage({ filter: filter.id })}
+                      className={`rounded-lg border px-3 py-2 text-sm transition ${
+                        activePage.filter === filter.id
+                          ? "border-white bg-white font-semibold text-zinc-950"
+                          : "border-zinc-800 text-zinc-300 hover:bg-zinc-900"
+                      }`}
+                    >
+                      {filter.label}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              <div className="rounded-2xl border border-zinc-900 bg-zinc-950 p-5">
+                <h2 className="text-sm font-semibold text-zinc-300">Orientation</h2>
+                <div className="mt-3 flex gap-2">
+                  {[0, 90, 180, 270].map((degrees) => (
+                    <button
+                      key={degrees}
+                      onClick={() => updateActivePage({ rotation: degrees as 0 | 90 | 180 | 270 })}
+                      className={`flex-1 rounded-lg border px-2 py-2 text-sm ${
+                        (activePage.rotation ?? 0) === degrees
+                          ? "border-white bg-white font-semibold text-zinc-950"
+                          : "border-zinc-800 text-zinc-300 hover:bg-zinc-900"
+                      }`}
+                    >
+                      {degrees}°
+                    </button>
+                  ))}
+                </div>
+                <button
+                  onClick={resetCorners}
+                  disabled={!activePage.corners}
+                  className="mt-3 w-full rounded-lg border border-zinc-800 px-3 py-2 text-sm text-zinc-300 hover:bg-zinc-900 disabled:opacity-40"
+                >
+                  Reset corners to full frame
+                </button>
+              </div>
+
+              <div className="flex gap-2">
+                <button
+                  onClick={acceptPage}
+                  disabled={processing}
+                  className="flex-1 rounded-xl bg-white px-5 py-3 font-semibold text-zinc-950 hover:bg-zinc-200 disabled:opacity-50"
+                >
+                  Accept page
+                </button>
+              </div>
+            </aside>
+          </section>
+        )}
+
+        {step === "review" && (
+          <section className="mt-6">
+            <div className="flex flex-wrap items-center justify-between gap-3">
+              <h2 className="text-lg font-semibold">
+                {pages.length} page{pages.length === 1 ? "" : "s"} ready
+              </h2>
+              <div className="flex flex-wrap gap-2">
+                <button onClick={scanAnother} className="rounded-xl border border-zinc-800 px-5 py-2.5 text-sm font-semibold text-zinc-100 hover:bg-zinc-900">
+                  Add another page
+                </button>
+                <button
+                  onClick={() => void finishDocument()}
+                  disabled={busy}
+                  className="rounded-xl bg-white px-5 py-2.5 text-sm font-semibold text-zinc-950 hover:bg-zinc-200 disabled:opacity-50"
+                >
+                  {busy ? (settings.autoOcr && backendUp ? "Running OCR…" : "Saving…") : "Finish & save"}
+                </button>
+              </div>
+            </div>
+
+            <ul className="mt-4 grid grid-cols-2 gap-4 sm:grid-cols-3 lg:grid-cols-4">
+              {pages.map((page, index) => (
+                <li key={page.id} className="rounded-2xl border border-zinc-900 bg-zinc-950 p-3">
+                  <div className="flex aspect-[3/4] items-center justify-center overflow-hidden rounded-lg bg-zinc-900">
+                    <BlobImage blob={page.processedImage ?? page.originalImage} className="h-full w-full object-cover" />
+                  </div>
+                  <div className="mt-2 flex items-center justify-between text-xs text-zinc-500">
+                    <span>Page {index + 1} · {FILTERS.find((f) => f.id === page.filter)?.label ?? page.filter}</span>
+                    {page.ocr && <span className="text-emerald-400">OCR ✓</span>}
+                  </div>
+                  <div className="mt-2 flex gap-1">
+                    <button onClick={() => movePage(index, -1)} disabled={index === 0} className="rounded border border-zinc-800 px-2 py-1 text-xs text-zinc-300 hover:bg-zinc-900 disabled:opacity-40">
+                      ←
+                    </button>
+                    <button onClick={() => movePage(index, 1)} disabled={index === pages.length - 1} className="rounded border border-zinc-800 px-2 py-1 text-xs text-zinc-300 hover:bg-zinc-900 disabled:opacity-40">
+                      →
+                    </button>
+                    <button
+                      onClick={() => {
+                        setActivePageIndex(index);
+                        setStep("adjust");
+                      }}
+                      className="rounded border border-zinc-800 px-2 py-1 text-xs text-zinc-300 hover:bg-zinc-900"
+                    >
+                      Edit
+                    </button>
+                    <button onClick={() => removePage(index)} className="ml-auto rounded border border-red-900/60 px-2 py-1 text-xs text-red-400 hover:bg-red-950/50">
+                      Delete
+                    </button>
+                  </div>
+                </li>
+              ))}
+            </ul>
+            {!settings.autoOcr && (
+              <p className="mt-4 text-sm text-zinc-500">
+                OCR is disabled in settings — pages will be saved without a text layer. Enable
+                auto-OCR in Settings for searchable documents.
+              </p>
+            )}
           </section>
         )}
       </div>
+      <canvas ref={canvasRef} className="hidden" />
     </main>
   );
 }

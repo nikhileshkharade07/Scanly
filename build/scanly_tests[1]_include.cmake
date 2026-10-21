@@ -1,0 +1,5 @@
+if(EXISTS "C:/Users/hp/Downloads/scanly-repo/scanly/build/scanly_tests[1]_tests.cmake")
+  include("C:/Users/hp/Downloads/scanly-repo/scanly/build/scanly_tests[1]_tests.cmake")
+else()
+  add_test(scanly_tests_NOT_BUILT scanly_tests_NOT_BUILT)
+endif()
