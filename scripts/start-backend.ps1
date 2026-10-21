@@ -9,12 +9,13 @@
 
 $server = Join-Path $PSScriptRoot "..\build\scanly_server.exe"
 if (-not (Test-Path $server)) {
-  Write-Error "scanly_server.exe not found at $server — build the backend first (cmake --build build)."
+  Write-Error "scanly_server.exe not found at $server - build the backend first (cmake --build build)."
   exit 1
 }
 
 $env:PATH = "C:\msys64\ucrt64\bin;$env:PATH"
 $env:TESSDATA_PREFIX = "C:\msys64\ucrt64\share\tessdata"
 
-Write-Host "Starting scanly_server on http://127.0.0.1:8080 (Ctrl+C to stop)…"
+Write-Host "Starting scanly_server on http://127.0.0.1:8080 (Ctrl+C to stop)..."
+$env:SCANLY_ALLOWED_ORIGINS = "http://localhost:3000,http://127.0.0.1:3000,https://scanly-e88npudo9-nikhileshkharade07.vercel.app"
 & $server @args
