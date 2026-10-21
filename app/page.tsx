@@ -67,6 +67,7 @@ export default function HomePage() {
         const id = crypto.randomUUID();
         const now = Date.now();
         const record: DocumentRecord = {
+          status: "draft",
           id,
           title: file.name.replace(/\.[a-z0-9]+$/i, "") || "Untitled scan",
           pages: [

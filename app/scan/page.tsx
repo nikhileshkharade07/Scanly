@@ -9,7 +9,7 @@ import { scanlyApi } from "@/lib/api/scanly";
 import { loadSettings } from "@/lib/settings";
 import { db } from "@/lib/storage/db";
 import { makeThumbnail } from "@/lib/utils/image";
-import type { DetectResult, DocumentRecord, FilterId, Point, ScanPage } from "@/types/scanner";
+import type { DetectResult, DocumentRecord, FilterId, ScanPage } from "@/types/scanner";
 
 type Step = "capture" | "adjust" | "review";
 type CameraState = "idle" | "starting" | "active" | "denied" | "unsupported";
@@ -102,9 +102,17 @@ export default function ScanPage() {
   const grabFrame = useCallback((): Promise<Blob | null> => {
     const video = videoRef.current;
     if (!video || video.videoWidth === 0) return Promise.resolve(null);
-    return new Promise((resolve) => {
-      video.toBlob((blob) => resolve(blob), "image/jpeg", 0.92);
-    });
+    const width = video.videoWidth;
+    const height = video.videoHeight;
+    const canvas = document.createElement("canvas");
+    canvas.width = width;
+    canvas.height = height;
+    const ctx = canvas.getContext("2d");
+    if (!ctx) return Promise.resolve(null);
+    ctx.drawImage(video, 0, 0, width, height);
+    return new Promise<Blob | null>((resolve) =>
+      canvas.toBlob((blob) => resolve(blob), "image/jpeg", 0.92),
+    );
   }, []);
 
   const adoptImage = useCallback(
@@ -134,7 +142,7 @@ export default function ScanPage() {
           const result: DetectResult = await scanlyApi.detect(blob);
           if (result.found && result.corners.length === 4) {
             setPages((prev) =>
-              prev.map((p) => (p.id === page.id ? { ...p, corners: result.corners as [Point, Point, Point, Point] } : p)),
+              prev.map((p) => (p.id === page.id ? { ...p, corners: result.corners } : p)),
             );
           } else if (source === "camera") {
             setNotice("No document edges detected — adjust the corners manually.");
@@ -238,7 +246,7 @@ export default function ScanPage() {
       const rect = event.currentTarget.getBoundingClientRect();
       const x = clamp01((event.clientX - rect.left) / rect.width);
       const y = clamp01((event.clientY - rect.top) / rect.height);
-      const corners = page.corners.map(([cx, cy], index) => (index === dragIndex ? ([x, y] as [number, number]) : ([cx, cy] as [number, number]))) as [Point, Point, Point, Point];
+      const corners = page.corners.map(([cx, cy], index) => (index === dragIndex ? ([x, y] as [number, number]) : ([cx, cy] as [number, number])));
       updateActivePage({ corners });
     },
     [activePageIndex, dragIndex, pages, updateActivePage],
@@ -288,6 +296,7 @@ export default function ScanPage() {
         title: `Scan ${new Date(now).toLocaleString()}`,
         pages: finished,
         searchableText,
+        status: "saved",
         createdAt: now,
         updatedAt: now,
       };
@@ -434,7 +443,7 @@ export default function ScanPage() {
                 onPointerUp={onOverlayPointerUp}
                 onPointerCancel={onOverlayPointerUp}
               >
-                {pagePreviewUrl && <BlobImage blob={pagePreviewUrl} className="block w-full" />}
+                {pagePreviewUrl && <img src={pagePreviewUrl} alt="Page preview" className="block w-full" />}
                 {activePage.corners && (
                   <svg viewBox="0 0 100 100" preserveAspectRatio="none" className="pointer-events-none absolute inset-0 h-full w-full">
                     <polygon
