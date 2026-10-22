@@ -182,16 +182,14 @@ export default function DocumentEditorPage() {
             createdAt: Date.now(),
             status: "draft",
           };
-          if (backendUp) {
-            try {
-              page.processedImage = await scanlyApi.process(file, { filter: page.filter, maxWidth: 1800 });
-              if (loadSettings().autoOcr) {
-                page.ocr = await scanlyApi.ocr(page.processedImage, loadSettings().ocrLanguage);
-                page.ocrLanguage = loadSettings().ocrLanguage;
-              }
-            } catch (error) {
-              console.warn("Processing added page failed:", error);
+          try {
+            page.processedImage = await scanlyApi.process(file, { filter: page.filter, maxWidth: 1800 });
+            if (loadSettings().autoOcr) {
+              page.ocr = await scanlyApi.ocr(page.processedImage, loadSettings().ocrLanguage);
+              page.ocrLanguage = loadSettings().ocrLanguage;
             }
+          } catch (error) {
+            console.warn("Processing added page failed:", error);
           }
           page.thumbnail = await makeThumbnail(page.processedImage ?? file, 480);
           pages.push(page);
@@ -201,7 +199,7 @@ export default function DocumentEditorPage() {
         setSaving(false);
       }
     },
-    [backendUp, doc, persist, rebuildText],
+    [doc, persist, rebuildText],
   );
 
   const totalBytes = doc
@@ -319,14 +317,14 @@ export default function DocumentEditorPage() {
                   <div className="flex flex-wrap items-center gap-2 text-sm">
                     <button
                       onClick={() => void runOcr(index)}
-                      disabled={!backendUp || busyPageIndex === index}
+                      disabled={busyPageIndex === index}
                       className="rounded-lg border border-zinc-800 px-3 py-1.5 text-zinc-200 hover:bg-zinc-900 disabled:opacity-40"
                     >
                       {busyPageIndex === index ? "Working…" : page.ocr ? "Re-run OCR" : "Run OCR"}
                     </button>
                     <button
                       onClick={() => void reprocessPage(index)}
-                      disabled={!backendUp || busyPageIndex === index}
+                      disabled={busyPageIndex === index}
                       className="rounded-lg border border-zinc-800 px-3 py-1.5 text-zinc-200 hover:bg-zinc-900 disabled:opacity-40"
                     >
                       Re-process
@@ -440,7 +438,7 @@ export default function DocumentEditorPage() {
                     </pre>
                   ) : (
                     <p className="mt-2 text-sm text-zinc-500">
-                      No text layer yet{backendUp ? " — run OCR to make this page searchable." : "."}
+                      No text layer yet — click &ldquo;Run OCR&rdquo; above to extract text.
                     </p>
                   )}
                 </div>

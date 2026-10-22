@@ -1,4 +1,8 @@
-import type { FilterId, OCRResult, Rotation } from "@/types/scanner";
+import type { DocumentRecord, FilterId, OCRResult, Rotation } from "@/types/scanner";
+import { detectDocument, processDocument } from "@/lib/vision/processor";
+import { runClientOcr } from "@/lib/ocr/tesseract-client";
+import { generateSearchablePdf } from "@/lib/pdf/generate-pdf";
+import type { OCRProgress } from "@/lib/ocr/types";
 
 /** Base URL of the local C++ processing backend. Loopback only — documents never leave the device. */
 export const SCANLY_API_BASE = (process.env.NEXT_PUBLIC_SCANLY_API ?? "http://127.0.0.1:8080").replace(/\/+$/, "");
@@ -37,7 +41,9 @@ export type ProcessOptions = {
 export type PdfPageMeta = { ocr?: OCRResult | null };
 export type PdfMeta = { title: string; pages: PdfPageMeta[] };
 
-const TIMEOUTS_MS = { health: 4000, detect: 20000, process: 90_000, ocr: 240_000, pdf: 120_000 } as const;
+const TIMEOUTS_MS = { health: 1500, detect: 5000, process: 8000, ocr: 10000, pdf: 10000 } as const;
+
+let backendReachable = false;
 
 async function fetchWithTimeout(url: string, init: RequestInit, timeoutMs: number): Promise<Response> {
   const controller = new AbortController();
@@ -76,55 +82,127 @@ async function postJson<T>(path: string, form: FormData, timeoutMs: number): Pro
 }
 
 export const scanlyApi = {
-  /** Backend liveness + engine info. Never throws; returns null when offline. */
-  async ping(): Promise<HealthInfo | null> {
+  /** Backend liveness + engine info. Never throws; returns browser engine when backend is offline. */
+  async ping(): Promise<HealthInfo> {
     try {
       const response = await fetchWithTimeout(`${SCANLY_API_BASE}/api/health`, { method: "GET" }, TIMEOUTS_MS.health);
-      if (!response.ok) return null;
-      return (await response.json()) as HealthInfo;
+      if (response.ok) {
+        backendReachable = true;
+        return (await response.json()) as HealthInfo;
+      }
     } catch {
-      return null;
+      /* offline */
     }
+    backendReachable = false;
+    return {
+      status: "browser-ready",
+      version: "1.0.0-wasm",
+      engine: { opencv: "Browser Canvas + Vision", tesseract: "Tesseract.js Web Worker" },
+      languages: ["eng"],
+    };
   },
 
   async languages(): Promise<string[]> {
-    const info = await postJson<{ languages: string[] }>(
-      "/api/ocr/languages",
-      new FormData(),
-      TIMEOUTS_MS.health,
-    );
-    return info.languages ?? [];
+    if (backendReachable) {
+      try {
+        const info = await postJson<{ languages: string[] }>(
+          "/api/ocr/languages",
+          new FormData(),
+          TIMEOUTS_MS.health,
+        );
+        if (info?.languages?.length) return info.languages;
+      } catch {
+        /* fallback to browser languages */
+      }
+    }
+    return ["eng"];
   },
 
-  /** Document boundary detection on a still image (or downscaled camera frame). */
+  /** Document boundary detection on a still image or camera frame. */
   async detect(image: Blob): Promise<import("@/types/scanner").DetectResult> {
-    return postJson("/api/vision/detect", imageForm(image), TIMEOUTS_MS.detect);
+    if (backendReachable) {
+      try {
+        return await postJson("/api/vision/detect", imageForm(image), TIMEOUTS_MS.detect);
+      } catch (err) {
+        console.warn("Backend detection failed, using browser detector:", err);
+      }
+    }
+    return detectDocument(image);
   },
 
   /** Perspective correction + enhancement. Returns processed image bytes (JPEG). */
   async process(image: Blob, options: ProcessOptions): Promise<Blob> {
-    const form = imageForm(image, { options: JSON.stringify(options) });
-    const response = await fetchWithTimeout(`${SCANLY_API_BASE}/api/image/process`, { method: "POST", body: form }, TIMEOUTS_MS.process);
-    if (!response.ok) await raiseAsApiError(response);
-    return response.blob();
+    if (backendReachable) {
+      try {
+        const form = imageForm(image, { options: JSON.stringify(options) });
+        const response = await fetchWithTimeout(`${SCANLY_API_BASE}/api/image/process`, { method: "POST", body: form }, TIMEOUTS_MS.process);
+        if (response.ok) return response.blob();
+      } catch (err) {
+        console.warn("Backend process failed, using browser processor:", err);
+      }
+    }
+    return processDocument(image, options);
   },
 
   /** Real OCR with word-level boxes and confidence. */
-  async ocr(image: Blob, lang = "eng"): Promise<OCRResult> {
-    const result = await postJson<OCRResult>("/api/ocr", imageForm(image, { lang }), TIMEOUTS_MS.ocr);
-    if (typeof result?.text !== "string" || !Array.isArray(result.blocks)) {
-      throw new ScanlyApiError(500, "invalid_ocr_response", "OCR engine returned an unexpected response shape.");
+  async ocr(
+    image: Blob,
+    lang = "eng",
+    onProgress?: (progress: OCRProgress) => void,
+  ): Promise<OCRResult> {
+    if (backendReachable) {
+      try {
+        const result = await postJson<OCRResult>("/api/ocr", imageForm(image, { lang }), TIMEOUTS_MS.ocr);
+        if (typeof result?.text === "string" && Array.isArray(result.blocks)) {
+          return result;
+        }
+      } catch (err) {
+        console.warn("Backend OCR failed, using browser Tesseract.js:", err);
+      }
     }
-    return result;
+    return runClientOcr(image, lang, onProgress);
   },
 
   /** Multi-page searchable PDF: scanned page images + invisible OCR text layer positioned by word boxes. */
-  async searchablePdf(meta: PdfMeta, pages: Blob[]): Promise<Blob> {
-    const form = new FormData();
-    form.append("meta", JSON.stringify(meta));
-    pages.forEach((page, index) => form.append(`page_${index}`, page, `page_${index}.jpg`));
-    const response = await fetchWithTimeout(`${SCANLY_API_BASE}/api/pdf/searchable`, { method: "POST", body: form }, TIMEOUTS_MS.pdf);
-    if (!response.ok) await raiseAsApiError(response);
-    return response.blob();
+  async searchablePdf(
+    meta: PdfMeta,
+    pages: Blob[],
+    docRecord?: DocumentRecord,
+    onProgress?: (curr: number, total: number) => void,
+  ): Promise<Blob> {
+    if (backendReachable) {
+      try {
+        const form = new FormData();
+        form.append("meta", JSON.stringify(meta));
+        pages.forEach((page, index) => form.append(`page_${index}`, page, `page_${index}.jpg`));
+        const response = await fetchWithTimeout(`${SCANLY_API_BASE}/api/pdf/searchable`, { method: "POST", body: form }, TIMEOUTS_MS.pdf);
+        if (response.ok) return response.blob();
+      } catch (err) {
+        console.warn("Backend PDF generation failed, using browser jsPDF:", err);
+      }
+    }
+
+    if (docRecord) {
+      return generateSearchablePdf(docRecord, onProgress);
+    }
+
+    // Synthesize DocumentRecord from meta and pages
+    const synthDoc: DocumentRecord = {
+      id: crypto.randomUUID(),
+      title: meta.title,
+      status: "saved",
+      searchableText: "",
+      createdAt: Date.now(),
+      updatedAt: Date.now(),
+      pages: pages.map((blob, idx) => ({
+        id: `p_${idx}`,
+        originalImage: blob,
+        processedImage: blob,
+        filter: "original",
+        ocr: meta.pages[idx]?.ocr ?? undefined,
+        createdAt: Date.now(),
+      })),
+    };
+    return generateSearchablePdf(synthDoc, onProgress);
   },
 };

@@ -137,25 +137,23 @@ export default function ScanPage() {
       });
 
       // Auto-detect document corners (best-effort; manual corners always available).
-      if (backendUp) {
-        setDetecting(true);
-        try {
-          const result: DetectResult = await scanlyApi.detect(blob);
-          if (result.found && result.corners.length === 4) {
-            setPages((prev) =>
-              prev.map((p) => (p.id === page.id ? { ...p, corners: result.corners } : p)),
-            );
-          } else if (source === "camera") {
-            setNotice("No document edges detected — adjust the corners manually.");
-          }
-        } catch (error) {
-          console.warn("Detection failed:", error);
-        } finally {
-          setDetecting(false);
+      setDetecting(true);
+      try {
+        const result: DetectResult = await scanlyApi.detect(blob);
+        if (result.found && result.corners.length === 4) {
+          setPages((prev) =>
+            prev.map((p) => (p.id === page.id ? { ...p, corners: result.corners } : p)),
+          );
+        } else if (source === "camera") {
+          setNotice("Adjust the corners to frame your document.");
         }
+      } catch (error) {
+        console.warn("Detection failed:", error);
+      } finally {
+        setDetecting(false);
       }
     },
-    [backendUp, originalUrl, settings.defaultFilter],
+    [originalUrl, settings.defaultFilter],
   );
 
   const onCapture = useCallback(async () => {
@@ -177,13 +175,15 @@ export default function ScanPage() {
   /** Live-processed preview for the active page. */
   const refreshPreview = useCallback(async () => {
     const page = pages[activePageIndex];
-    if (!page || !backendUp) return;
+    if (!page) return;
     setProcessing(true);
     try {
       const blob = await scanlyApi.process(page.originalImage, {
         corners: page.corners ? page.corners.map(([x, y]) => [x, y]) : undefined,
         filter: page.filter,
         rotation: page.rotation ?? 0,
+        brightness: page.brightness ?? 1.0,
+        contrast: page.contrast ?? 1.0,
         maxWidth: 1800,
       });
       if (processedUrl) URL.revokeObjectURL(processedUrl);
@@ -197,15 +197,15 @@ export default function ScanPage() {
     } finally {
       setProcessing(false);
     }
-  }, [activePageIndex, backendUp, pages, processedUrl]);
+  }, [activePageIndex, pages, processedUrl]);
 
   // Debounced preview refresh when the page or its settings change.
   useEffect(() => {
-    if (step !== "adjust" || !activePage || !backendUp) return;
-    const timer = setTimeout(() => void refreshPreview(), 350);
+    if (step !== "adjust" || !activePage) return;
+    const timer = setTimeout(() => void refreshPreview(), 300);
     return () => clearTimeout(timer);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [activePage?.corners, activePage?.filter, activePage?.rotation, step, backendUp]);
+  }, [activePage?.corners, activePage?.filter, activePage?.rotation, activePage?.brightness, activePage?.contrast, step]);
 
   const updateActivePage = useCallback(
     (patch: Partial<ScanPage>) => {
@@ -277,7 +277,7 @@ export default function ScanPage() {
       const finished: ScanPage[] = [];
       for (const page of pages) {
         let ocr = page.ocr;
-        if (!ocr && settings.autoOcr && backendUp) {
+        if (!ocr && settings.autoOcr) {
           try {
             ocr = await scanlyApi.ocr(page.processedImage ?? page.originalImage, lang);
           } catch (error) {
@@ -309,7 +309,7 @@ export default function ScanPage() {
     } finally {
       setBusy(false);
     }
-  }, [backendUp, pages, router, settings.autoOcr, settings.ocrLanguage]);
+  }, [pages, router, settings.autoOcr, settings.ocrLanguage]);
 
   const removePage = useCallback(
     (index: number) => {

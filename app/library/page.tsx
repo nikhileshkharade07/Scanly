@@ -114,10 +114,6 @@ function LibraryInner() {
 
   const exportPdf = useCallback(
     async (doc: DocumentRecord) => {
-      if (!backendUp) {
-        setNotice("The processing engine is offline — start the C++ backend to export PDFs.");
-        return;
-      }
       setExportingId(doc.id);
       setNotice(null);
       try {
@@ -126,7 +122,7 @@ function LibraryInner() {
           pages: doc.pages.map((page) => ({ ocr: page.ocr ?? null })),
         };
         const blobs = doc.pages.map((page) => page.processedImage ?? page.originalImage);
-        const pdf = await scanlyApi.searchablePdf(meta, blobs);
+        const pdf = await scanlyApi.searchablePdf(meta, blobs, doc);
         downloadBlob(pdf, `${sanitizeFilename(doc.title)}.pdf`);
       } catch (error) {
         console.error("PDF export failed:", error);
@@ -135,16 +131,26 @@ function LibraryInner() {
         setExportingId(null);
       }
     },
-    [backendUp],
+    [],
+  );
+
+  const exportImages = useCallback(
+    (doc: DocumentRecord) => {
+      doc.pages.forEach((page, index) => {
+        const blob = page.processedImage ?? page.originalImage;
+        downloadBlob(blob, `${sanitizeFilename(doc.title)}-page-${index + 1}.jpg`);
+      });
+    },
+    [],
   );
 
   // Auto-open export for a document linked from the editor.
   useEffect(() => {
     if (!exportTarget) return;
     const doc = docs.find((d) => d.id === exportTarget);
-    if (doc && backendUp) void exportPdf(doc);
+    if (doc) void exportPdf(doc);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [exportTarget, docs, backendUp]);
+  }, [exportTarget, docs]);
 
   return (
     <main className="min-h-screen bg-zinc-950 px-4 py-6 text-zinc-100 sm:px-8">
@@ -252,12 +258,15 @@ function LibraryInner() {
                           onClick={() => void exportPdf(doc)}
                           disabled={exportingId === doc.id}
                           className="rounded-lg bg-white px-3 py-1.5 text-xs font-semibold text-zinc-950 hover:bg-zinc-200 disabled:opacity-50"
-                          title={backendUp ? "Searchable PDF with invisible OCR layer" : "Requires the local processing engine"}
+                          title="Searchable PDF with invisible OCR layer"
                         >
                           {exportingId === doc.id ? "Exporting…" : "PDF"}
                         </button>
                         <button onClick={() => exportTxt(doc)} className="rounded-lg border border-zinc-800 px-3 py-1.5 text-xs text-zinc-200 hover:bg-zinc-900">
                           TXT
+                        </button>
+                        <button onClick={() => exportImages(doc)} className="rounded-lg border border-zinc-800 px-3 py-1.5 text-xs text-zinc-200 hover:bg-zinc-900">
+                          Images
                         </button>
                         <button onClick={() => toggleSelect(doc.id)} className="rounded-lg border border-zinc-800 px-3 py-1.5 text-xs text-zinc-200 hover:bg-zinc-900">
                           {selected.has(doc.id) ? "Deselect" : "Select"}

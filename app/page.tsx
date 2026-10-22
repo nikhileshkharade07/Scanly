@@ -15,15 +15,13 @@ function BackendBadge({ health }: { health: HealthInfo | null | "loading" }) {
   if (health === "loading") {
     return <span className="rounded-full border border-zinc-800 px-3 py-1 text-xs text-zinc-500">Checking engine…</span>;
   }
-  if (!health) {
-    return <span className="rounded-full border border-amber-900/60 bg-amber-950/40 px-3 py-1 text-xs text-amber-300">Engine offline</span>;
-  }
+  const isNative = health?.status === "ok";
   return (
     <span
       className="rounded-full border border-emerald-900/60 bg-emerald-950/40 px-3 py-1 text-xs text-emerald-400"
-      title={`OpenCV ${health.engine.opencv} · Tesseract ${health.engine.tesseract} · Languages: ${health.languages.join(", ")}`}
+      title={isNative ? `Native C++ Backend: OpenCV ${health?.engine.opencv} · Tesseract ${health?.engine.tesseract}` : "Local Browser Engine: Canvas Vision + Tesseract.js Web Worker (100% on-device)"}
     >
-      Engine ready · OCR: {health.languages.join(", ")}
+      {isNative ? "Native Accelerator Active" : "Local Engine Ready"} · OCR: {health?.languages?.join(", ") || "eng"}
     </span>
   );
 }
