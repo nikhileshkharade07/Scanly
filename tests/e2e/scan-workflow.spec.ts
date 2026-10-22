@@ -26,7 +26,7 @@ test.describe("Scanly Core User Workflows", () => {
     await expect(page.getByRole("heading", { name: /history/i })).toBeVisible();
   });
 
-  test("settings page toggles theme and preferences", async ({ page }) => {
+  test("settings page toggles theme, default filters, multilingual OCR and reset", async ({ page }) => {
     await page.goto("/settings");
     await expect(page.getByText(/appearance/i)).toBeVisible();
 
@@ -41,6 +41,29 @@ test.describe("Scanly Core User Workflows", () => {
     await expect(darkButton).toBeVisible();
     await darkButton.click();
     await expect(page.locator("html")).toHaveClass(/dark/);
+
+    // Multilingual OCR selector: search Hindi
+    const searchInput = page.getByPlaceholder(/search languages/i);
+    await expect(searchInput).toBeVisible();
+    await searchInput.fill("Hindi");
+
+    // Click Hindi card to add it
+    const hindiButton = page.getByRole("button", { name: /hindi/i }).first();
+    await expect(hindiButton).toBeVisible();
+    await hindiButton.click();
+
+    // Verify badge contains Hindi with removal button
+    await expect(page.getByRole("button", { name: /remove hindi/i })).toBeVisible();
+
+    // Clear search and reset to defaults
+    await searchInput.fill("");
+    const resetButton = page.getByRole("button", { name: /reset to defaults/i });
+    await expect(resetButton).toBeVisible();
+    page.once("dialog", (dialog) => dialog.accept());
+    await resetButton.click();
+
+    // Verify settings notice confirms reset
+    await expect(page.getByText(/settings reset to defaults/i)).toBeVisible();
   });
 
   test("image upload creates a document draft and opens editor", async ({ page }) => {

@@ -3,6 +3,7 @@ import { detectDocument, processDocument } from "@/lib/vision/processor";
 import { runClientOcr } from "@/lib/ocr/tesseract-client";
 import { generateSearchablePdf } from "@/lib/pdf/generate-pdf";
 import type { OCRProgress } from "@/lib/ocr/types";
+import { SUPPORTED_LANGUAGES } from "@/lib/settings";
 
 /** Base URL of the local C++ processing backend. Loopback only — documents never leave the device. */
 export const SCANLY_API_BASE = (process.env.NEXT_PUBLIC_SCANLY_API ?? "http://127.0.0.1:8080").replace(/\/+$/, "");
@@ -98,7 +99,7 @@ export const scanlyApi = {
       status: "browser-ready",
       version: "1.0.0-wasm",
       engine: { opencv: "Browser Canvas + Vision", tesseract: "Tesseract.js Web Worker" },
-      languages: ["eng"],
+      languages: SUPPORTED_LANGUAGES.map((l) => l.code),
     };
   },
 
@@ -115,7 +116,7 @@ export const scanlyApi = {
         /* fallback to browser languages */
       }
     }
-    return ["eng"];
+    return SUPPORTED_LANGUAGES.map((l) => l.code);
   },
 
   /** Document boundary detection on a still image or camera frame. */

@@ -18,7 +18,14 @@ export const metadata: Metadata = {
 
 export default function RootLayout({ children }: Readonly<{ children: React.ReactNode }>) {
   return (
-    <html lang="en" className={inter.className}>
+    <html lang="en" className={inter.className} suppressHydrationWarning>
+      <head>
+        <script
+          dangerouslySetInnerHTML={{
+            __html: `(function(){try{var raw=localStorage.getItem("scanly.settings.v1");var theme=raw?JSON.parse(raw).theme:"dark";var isDark=theme==="dark"||(theme==="system"&&window.matchMedia&&window.matchMedia("(prefers-color-scheme: dark)").matches)||!theme;if(isDark){document.documentElement.classList.add("dark");document.documentElement.dataset.theme=theme||"dark";document.documentElement.style.colorScheme="dark";}else{document.documentElement.classList.remove("dark");document.documentElement.dataset.theme="light";document.documentElement.style.colorScheme="light";}}catch(e){document.documentElement.classList.add("dark");}})();`,
+          }}
+        />
+      </head>
       <body>
         <a href="#main-content" className="skip-link">
           Skip to main content

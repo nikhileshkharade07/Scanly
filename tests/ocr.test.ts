@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { parseTesseractOutput } from "@/lib/ocr/parse-result";
+import { normalizeLanguageParam } from "@/lib/ocr/tesseract-client";
 
 describe("OCR parsing", () => {
   it("handles null and empty input gracefully", () => {
@@ -69,3 +70,22 @@ describe("OCR parsing", () => {
     expect(word1.bbox).toEqual({ x: 100, y: 20, width: 100, height: 30 });
   });
 });
+
+describe("OCR Multilingual parameter normalization", () => {
+  it("defaults undefined or empty strings to 'eng'", () => {
+    expect(normalizeLanguageParam()).toBe("eng");
+    expect(normalizeLanguageParam("")).toBe("eng");
+    expect(normalizeLanguageParam([])).toBe("eng");
+  });
+
+  it("normalizes arrays of language codes into plus-delimited strings", () => {
+    expect(normalizeLanguageParam(["eng", "hin"])).toBe("eng+hin");
+    expect(normalizeLanguageParam(["eng", "hin", "mar"])).toBe("eng+hin+mar");
+  });
+
+  it("handles whitespace and pre-formatted plus strings correctly", () => {
+    expect(normalizeLanguageParam("eng + hin + mar ")).toBe("eng+hin+mar");
+    expect(normalizeLanguageParam([" eng ", " hin "])).toBe("eng+hin");
+  });
+});
+

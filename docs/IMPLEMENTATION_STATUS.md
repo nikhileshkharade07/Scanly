@@ -19,8 +19,8 @@ All core pipeline stages have been implemented, tested, and verified:
 | Quality Gate | Command | Result | Details |
 |---|---|---|---|
 | **TypeScript Typecheck** | `corepack pnpm typecheck` | **PASS (0 errors)** | Strict TypeScript validation via `tsc --noEmit` |
-| **Unit & Integration Tests** | `corepack pnpm test` | **PASS (26/26 tests)** | Vitest: geometry, Sobel detection, filters, OCR parsing, exports, search |
-| **End-to-End (E2E) Tests** | `corepack pnpm e2e` | **PASS (4/4 tests)** | Playwright (Chrome): navigation, settings toggle, file upload, editor, library search |
+| **Unit & Integration Tests** | `corepack pnpm test` | **PASS (42/42 tests)** | Vitest: settings store, theme resolution, multilingual parameters, geometry, Sobel detection, filters, OCR parsing, exports, search |
+| **End-to-End (E2E) Tests** | `corepack pnpm e2e` | **PASS (4/4 tests)** | Playwright (Chrome): navigation, theme toggling, multilingual language search/badge management, settings reset, file upload, editor, library search |
 | **Production Build** | `corepack pnpm build` | **PASS** | Next.js 15.5.27 production build (`.next`) compiled cleanly |
 
 ---
@@ -98,6 +98,15 @@ All core pipeline stages have been implemented, tested, and verified:
   - Mobile-responsive navigation and touch targets.
   - Zero external cloud transmission of document pixels or text.
   - PWA web app manifest and SVG icon.
+
+### Phase 11: Settings Store, Themes & Multilingual OCR
+- **Status**: Implemented & Verified
+- **Files**: `lib/settings.ts`, `app/settings/page.tsx`, `lib/ocr/tesseract-client.ts`, `app/globals.css`, `tests/settings.test.ts`
+- **Capabilities**:
+  - **Appearance Themes**: Fully functional System, Dark, and Light themes across all routes, dialogs, and controls. Flash-free inline script execution on initial document load, system `prefers-color-scheme` live synchronization, and daylight high-contrast palette.
+  - **Default Filter Configuration**: Typed single source of truth (`lib/settings.ts`) automatically applied to new camera captures and uploads without altering untouched originals or retroactively mutating existing documents.
+  - **Multilingual OCR Engine**: Searchable multi-select picker supporting 23 Indian (Hindi, Marathi, Bengali, Gujarati, Tamil, Telugu, Kannada, Malayalam, Punjabi, Urdu) and international languages. Combines selected language codes (e.g. `eng+hin+mar`) for Tesseract.js v6 Web Worker execution with worker caching, live progress reporting, and offline-safe error handling.
+  - **Resilient Persistence**: Centralized typed store with schema sanitization, backward-compatible migration from legacy string formats, corrupted storage recovery, and "Reset to Defaults".
 
 ---
 
